@@ -140,6 +140,32 @@ def write_csv(d):
                         round(d["energy_eff"][i], 3), round(d["dcir"][i], 2)])
 
 
+def recommend(d, a) -> list[str]:
+    """劣化指標から、寿命改善・運用条件の見直し方針（電池/電源設計の観点）を提示する。"""
+    recs = []
+    dcir_growth = (d["dcir"][-1] / d["dcir"][0] - 1) * 100
+    if a["fade_per_100"] > 3.0:
+        recs.append(f"**容量劣化が速い**（{a['fade_per_100']:.2f}%/100cyc）: "
+                    "充電終止電圧の引き下げ(例 4.2→4.1V)、充放電レート(Cレート)の低減、"
+                    "高SOC放置時間の短縮、放電深度(DoD)の抑制で寿命を延ばせる。")
+    if a["mean_ce"] < 99.5:
+        recs.append(f"**クーロン効率がやや低い**（{a['mean_ce']:.2f}%）: "
+                    "SEI成長/副反応が示唆される。温度管理(高温回避)、過充電防止、"
+                    "充電プロファイル(CV保持時間)の見直しを検討。")
+    if dcir_growth > 20:
+        recs.append(f"**内部抵抗の増加が大きい**（初期比 +{dcir_growth:.0f}%）: "
+                    "インピーダンス劣化。熱管理の強化、Cレート低減、"
+                    "用途側ではIRドロップを見込んだ電圧マージン設計を。")
+    margin = a["final_ret"] - SPEC["retention_min"]
+    if 0 <= margin < 5:
+        recs.append(f"**寿命規格に対する余裕が小さい**（維持率 {a['final_ret']:.1f}% / "
+                    f"規格 {SPEC['retention_min']:g}%）: 上記の運用条件緩和、"
+                    "またはセル選定/並列数の見直しで余裕を確保。")
+    if not recs:
+        recs.append("劣化挙動は良好。現条件を維持しつつ、温度・Cレートの運用範囲を文書化して再現性を担保。")
+    return recs
+
+
 def write_report(d, a):
     verdict = "✅ PASS" if a["passed"] else "❌ FAIL"
     lines = [
@@ -154,6 +180,8 @@ def write_report(d, a):
     ]
     for name, meas, spec, ok in a["checks"]:
         lines.append(f"| {name} | {meas} | {spec} | {'✅' if ok else '❌'} |")
+    lines += ["", "## 改善提案（寿命・運用条件）", ""]
+    lines += [f"- {r}" for r in recommend(d, a)]
     lines += [
         "", "## グラフ", "",
         "![容量維持率](capacity_retention.png)", "",
